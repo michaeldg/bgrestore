@@ -164,13 +164,13 @@ function prepit {
 
 	if [ "$lastfullencrypted" == "yes" ] ; then
 		log_info "Backup is encrypted."
-        $innocommand --decrypt=AES256 --encrypt-key="$(cat "$lastfullcryptkey")" --parallel="$threads" "$bufullpath"
+        $innocommand --decrypt=AES256 --encrypt-key="$(cat "$lastfullcryptkey")" --parallel="$threads" "$bufullpath" || { echo 'Decrypting failed.'; exit }
         for i in `find $bufullpath -iname "*\.xbcrypt"`; do rm -f $i; done
         log_info "Backup now decrypted."
     fi 
     if [ "$lastfullcompressed" == "yes" ] ; then
     	log_info "Backup is compressed."
-        $innocommand --decompress --parallel="$threads" "$bufullpath"
+        $innocommand --decompress --parallel="$threads" "$bufullpath" || { echo 'Decompressing failed.'; exit }
         for i in `find $bufullpath -iname "*\.qp"`; do rm -f $i; done
         log_info "Backup is now decompressed."
     fi
