@@ -36,6 +36,17 @@ function log_info() {
     fi
 }
 
+# Error function
+function  log_error() {
+    if [ "$syslog" = yes ] ; then
+        logger -p local0.notice -t bgrestore "$*"
+    fi
+    printf "%s --> %s\n" "$(date +%Y-%m-%d-%T)" "$*" >>"$logfile"
+    printf "%s --> %s\n" "$(date +%Y-%m-%d-%T)" "$*" 1>&2
+    exit 1
+}
+
+
 # Preflight checks
 function preflight {
     # find and source the config file
@@ -164,13 +175,13 @@ function prepit {
 
 	if [ "$lastfullencrypted" == "yes" ] ; then
 		log_info "Backup is encrypted."
-        $innocommand --decrypt=AES256 --encrypt-key="$(cat "$lastfullcryptkey")" --parallel="$threads" "$bufullpath" || { echo 'Decrypting failed.'; exit }
+        $innocommand --decrypt=AES256 --encrypt-key="$(cat "$lastfullcryptkey")" --parallel="$threads" "$bufullpath" || log_error "Decrypt failed"
         for i in `find $bufullpath -iname "*\.xbcrypt"`; do rm -f $i; done
         log_info "Backup now decrypted."
     fi 
     if [ "$lastfullcompressed" == "yes" ] ; then
     	log_info "Backup is compressed."
-        $innocommand --decompress --parallel="$threads" "$bufullpath" || { echo 'Decompressing failed.'; exit }
+        $innocommand --decompress --parallel="$threads" "$bufullpath" || log_error "Decompress failed"
         for i in `find $bufullpath -iname "*\.qp"`; do rm -f $i; done
         log_info "Backup is now decompressed."
     fi
