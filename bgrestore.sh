@@ -256,12 +256,12 @@ mysqlcommand=$(command -v mysql)
 
 # do the work
 preflight
-if [ "$deletefirst" == "no" ] ; then
+if [ "$deletefirst" == "yes" ] ; then
     deleteoldrestore
 fi
 lastfullinfo
 prepit
-if [ "$deletefirst" != "no" ] ; then
+if [ "$deletefirst" != "yes" ] ; then
     deleteoldrestore
 fi
 restoreit
