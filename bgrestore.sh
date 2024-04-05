@@ -178,8 +178,8 @@ function prepit {
     log_info "Backup has been prepared for restore."
 }
 
-# Function to restore
-function restoreit {
+# Function to delete old restore
+function deleteoldrestore {
 
 	log_info "Shutting down MariaDB to restore. "
 	mysqlshutdowncreate
@@ -192,6 +192,10 @@ function restoreit {
 
     log_info "Deleting the data directory."
     rm -Rf "${datadir:?}"/*
+}
+
+# Function to restore
+function restoreit {
 
     log_info "Moving the prepared backup to the data directory."
     $innocommand --move-back "$bufullpath"
@@ -241,8 +245,14 @@ mysqlcommand=$(command -v mysql)
 
 # do the work
 preflight
+if [ "$deletefirst" == "no" ] ; then
+    deleteoldrestore
+fi
 lastfullinfo
 prepit
+if [ "$deletefirst" != "no" ] ; then
+    deleteoldrestore
+fi
 restoreit
 cleanup
 

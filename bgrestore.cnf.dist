@@ -39,6 +39,9 @@ backuphost=hostname_from_backup_history
 # Skip copy step, place backup in preppath after creating it. This will also make bgrestore delete the contents of the folder instead of the folder itself (after succeeding)
 skipcopy=no
 
+# Delete the previous restore first (before starting to decompress the backup)
+deletefirst=no
+
 # Datadir
 datadir=/var/lib/mysql
 
