@@ -176,7 +176,7 @@ function prepit {
 	if [ "$lastfullencrypted" == "yes" ] ; then
 		log_info "Backup is encrypted."
         $innocommand --decrypt=AES256 --encrypt-key="$(cat "$lastfullcryptkey")" --parallel="$threads" "$bufullpath" >> "$logfile"
-        $decryptstatus=$?
+        decryptstatus=$?
         if [ "$decryptstatus" -eq 0 ] ; then
             log_info "Backup decrypt was successfol."
         else
@@ -190,7 +190,7 @@ function prepit {
     if [ "$lastfullcompressed" == "yes" ] ; then
     	log_info "Backup is compressed."
         $innocommand --decompress --parallel="$threads" "$bufullpath" >> "$logfile"
-        $decompressstatus=$?
+        decompressstatus=$?
         if [ "$decompressstatus" -eq 0 ] ; then
             log_info "Backup decompress was successfol."
         else
@@ -203,7 +203,7 @@ function prepit {
         log_info "Backup is now decompressed."
     fi
     $innocommand --apply-log "$bufullpath"  >> "$logfile" 
-    $applystatus=$?
+    applystatus=$?
     if [ "$applystatus" -eq 0 ] ; then
         log_info "Backup apply log was successfol."
     else
@@ -226,7 +226,7 @@ function deleteoldrestore {
     pkill -9 mysqld
     systemctl stop mariadb
     log_info "Current data dir contents:"
-    ls -al "${datadir}" >> "$logfile"
+    ls -al "${datadir:?}" >> "$logfile"
 
     log_info "Deleting the data directory."
     rm -Rf "${datadir:?}"/*
@@ -236,7 +236,7 @@ function deleteoldrestore {
 function restoreit {
 
     log_info "Moving the prepared backup in $bufullpath to the data directory."
-    $innocommand --move-back "$bufullpath"
+    $innocommand --move-back "$bufullpath" --datadir="${datadir:?}"
     movebackstatus=$?
     if [ "$movebackstatus" -eq 0 ] ; then
         log_info "MariaDB succussfully restored and restarted."
