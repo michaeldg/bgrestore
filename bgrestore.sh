@@ -175,17 +175,42 @@ function prepit {
 
 	if [ "$lastfullencrypted" == "yes" ] ; then
 		log_info "Backup is encrypted."
-        $innocommand --decrypt=AES256 --encrypt-key="$(cat "$lastfullcryptkey")" --parallel="$threads" "$bufullpath" || log_error "Decrypt failed"
+        $innocommand --decrypt=AES256 --encrypt-key="$(cat "$lastfullcryptkey")" --parallel="$threads" "$bufullpath" >> "$logfile"
+        $decryptstatus=$?
+        if [ "$decryptstatus" -eq 0 ] ; then
+            log_info "Backup decrypt was successfol."
+        else
+            log_status=FAILED
+            log_info "Something went wrong. Decrypt failed."
+            exit 1
+        fi
         for i in `find $bufullpath -iname "*\.xbcrypt"`; do rm -f $i; done
         log_info "Backup now decrypted."
     fi 
     if [ "$lastfullcompressed" == "yes" ] ; then
     	log_info "Backup is compressed."
-        $innocommand --decompress --parallel="$threads" "$bufullpath" || log_error "Decompress failed"
+        $innocommand --decompress --parallel="$threads" "$bufullpath" >> "$logfile"
+        $decompressstatus=$?
+        if [ "$decompressstatus" -eq 0 ] ; then
+            log_info "Backup decompress was successfol."
+        else
+            log_status=FAILED
+            log_info "Something went wrong. Decompress failed."
+            exit 1
+        fi
+
         for i in `find $bufullpath -iname "*\.qp"`; do rm -f $i; done
         log_info "Backup is now decompressed."
     fi
-    $innocommand --apply-log "$bufullpath"
+    $innocommand --apply-log "$bufullpath"  >> "$logfile" 
+    $applystatus=$?
+    if [ "$applystatus" -eq 0 ] ; then
+        log_info "Backup apply log was successfol."
+    else
+        log_status=FAILED
+        log_info "Something went wrong. Apply log failed."
+        exit 1
+    fi
     log_info "Backup has been prepared for restore."
 }
 
@@ -200,6 +225,8 @@ function deleteoldrestore {
     systemctl stop mariadb
     pkill -9 mysqld
     systemctl stop mariadb
+    log_info "Current data dir contents:"
+    ls -al "${datadir}" >> "$logfile"
 
     log_info "Deleting the data directory."
     rm -Rf "${datadir:?}"/*
@@ -208,8 +235,16 @@ function deleteoldrestore {
 # Function to restore
 function restoreit {
 
-    log_info "Moving the prepared backup to the data directory."
+    log_info "Moving the prepared backup in $bufullpath to the data directory."
     $innocommand --move-back "$bufullpath"
+    movebackstatus=$?
+    if [ "$movebackstatus" -eq 0 ] ; then
+        log_info "MariaDB succussfully restored and restarted."
+    else
+        log_status=FAILED
+        log_info "Something went wrong. Move back process failed."
+        exit 1
+    fi
 
     log_info "Fixing privileges."
     chown -R "$datadirowner":"$datadirgroup" "$datadir"
