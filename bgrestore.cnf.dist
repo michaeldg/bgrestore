@@ -54,6 +54,9 @@ datadirgroup=mysql
 # Path to keep logs
 logpath=/var/log
 
+# Number of logs to keep
+keeplognum=1000
+
 # Log to syslog
 syslog=no
 

@@ -277,6 +277,18 @@ function cleanup {
 	fi
 }
 
+# Function to cleanup logs
+function log_cleanup {
+    if [ $log_status = "SUCCEEDED" ]; then
+        delloglist=$(ls -tp "$logpath/bgbackup*" | tail -n +$((keeplognum+=1)))
+        for logtodelete in $delloglist; do
+            rm -f "$logdir"/"$logtodelete"
+            log_info "Deleted log file $logtodelete"
+        done
+    else
+        log_info "Backup failed. Not deleting any log files at this time."
+    fi
+}
 
 
 ##### Begin script
@@ -305,3 +317,5 @@ cleanup
 # email the log
 mail_log
 
+# clean old log ifles
+log_cleanup
