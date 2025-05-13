@@ -148,13 +148,7 @@ function lastfullinfo {
         mail_log
         exit 1
     fi
-    lastfullbktype=$($mysqlhistcommand "select bktype from $backuphistschema.backup_history where uuid = '$lastfulluuid' ")
-    if [ "$lastfullbktype" != "directory" ] ; then
-        log_info "$lastfullbktype not yet supported."
-        log_status=FAILED
-        mail_log
-        exit 2
-    fi
+
     lastfullcompressed=$($mysqlhistcommand "select compressed from $backuphistschema.backup_history where uuid = '$lastfulluuid' ")
     lastfullencrypted=$($mysqlhistcommand "select encrypted from $backuphistschema.backup_history where uuid = '$lastfulluuid' ")
     if [ "$lastfullencrypted" == "yes" ] ; then
