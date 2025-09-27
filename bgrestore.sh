@@ -2,7 +2,7 @@
 
 # bgrestore - Automate the restore of backups taken with bgbackup script. Great for backup verification, development refreshes, etc.
 #
-# Authors: Ben Stillman <ben@mariadb.com>
+# Authors: Ben Stillman <ben@mariadb.com>, Michaël de Groot
 # License: GNU General Public License, version 3.
 # Redistribution/Reuse of this code is permitted under the GNU v3 license.
 # As an additional term ALL code must carry the original Author(s) credit in comment form.
