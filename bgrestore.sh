@@ -243,6 +243,9 @@ function restoreit {
     log_info "Fixing privileges."
     chown -R "$datadirowner":"$datadirgroup" "$datadir"
 
+    echo "Fixing unfinished transactions. MDEV-6660 workaround."
+    sudo -u mysql mysqld --tc-heuristic-recover=ROLLBACK
+
     log_info "Starting MariaDB."
     systemctl start mariadb
 
