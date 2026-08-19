@@ -110,36 +110,38 @@ function mysqlshutdowncreate {
     mysqlshutdowncommand=$mysqlshutdowncommand" -Bse "
 }
 
-# Function to get directory and other info from last full backup
-function lastfullinfo {
+# Function to get directory and other info from the last backup (any type -- fgrestore
+# is chain-aware, so a Differential/Incremental gets trickled back to its Full automatically)
+function lastbackupinfo {
     mysqlhistcreate
-    lastfulluuid=$($mysqlhistcommand "select uuid from $backuphistschema.backup_history where butype = 'Full' and status = 'SUCCEEDED' and hostname = '$backuphost' and (deleted_at IS NULL OR deleted_at = 0) order by end_time desc limit 1")
-    lastfullbulocation=$($mysqlhistcommand "select bulocation from $backuphistschema.backup_history where uuid = '$lastfulluuid' ")
-    if [ "$lastfullbulocation" == '' ] ; then
+    lastbuuuid=$($mysqlhistcommand "select uuid from $backuphistschema.backup_history where status = 'SUCCEEDED' and hostname = '$backuphost' and (deleted_at IS NULL OR deleted_at = 0) order by end_time desc limit 1")
+    lastbulocation=$($mysqlhistcommand "select bulocation from $backuphistschema.backup_history where uuid = '$lastbuuuid' ")
+    if [ "$lastbulocation" == '' ] ; then
         log_info "Backup location not set successfully."
         log_status=FAILED
         mail_log
         exit 2
     fi
-    if [ ! -d "$lastfullbulocation" ] && [ "$skipcopy" != "yes" ] ; then
+    if [ ! -d "$lastbulocation" ] && [ "$skipcopy" != "yes" ] ; then
 
-        log_info "Error: $lastfullbulocation directory not found"
-        log_info "The directory for the last full backup cannot be found on this server."
+        log_info "Error: $lastbulocation directory not found"
+        log_info "The directory for the last backup cannot be found on this server."
         log_status=FAILED
         mail_log
         exit 1
     fi
 
-    log_info "Last full backup to restore: $lastfullbulocation "
+    log_info "Last backup to restore: $lastbulocation "
 }
 
 # Cleanup the decompressed/decrypted backup copy
 # Regardless of skipcopy, fgrestore always ends up with the prepared backup flattened
 # directly into $preppath (skipcopy=yes: prepared in place there via '-I'; skipcopy=no:
 # fgrestore itself copies into it via '-D') -- so cleanup is now the same either way.
-# Also sweeps fgrestore's chain-staging dirs ('<restore_path>.inc.*'); in practice bgrestore
-# only ever restores Full backups (see lastfullinfo) so these shouldn't exist, but -M's
-# --move-back already moved everything of substance out, so sweeping is a safe no-op.
+# Also sweeps fgrestore's chain-staging dirs ('<restore_path>.inc.*') -- bgrestore now
+# restores the latest backup of any type, so a Differential/Incremental chain of more
+# than one member does create these; -M's --move-back only moves $preppath itself back,
+# not the per-member staging dirs.
 function cleanup {
 	if [ "$log_status" == "SUCCEEDED" ] ; then
 	    log_info "Cleaning up."
@@ -218,7 +220,7 @@ fi
 trap 'rm -f $lockfile' 0
 touch $lockfile
 
-lastfullinfo
+lastbackupinfo
 
 log_info "Shutting down MariaDB to restore."
 mysqlshutdowncreate
@@ -228,13 +230,13 @@ $mysqlshutdowncommand "shutdown"
 # (Full/Differential/Incremental). '-r' always removes compressed originals after
 # decompression. skipcopy=yes means copy-last-backup.sh already rsynced the backup
 # straight into preppath, so '-I' (in-place) prepares it there directly -- a second
-# copy would double disk usage. Otherwise fgrestore copies from lastfullbulocation
+# copy would double disk usage. Otherwise fgrestore copies from lastbulocation
 # into preppath itself via '-D'.
 if [ "$skipcopy" == "yes" ]; then
     fgrestore -S "$preppath" -C "$restore_my_cnf_file" -M -N -r -I \
       $( [ "$run_restorecon" == "yes" ] && echo -R ) >> "$logfile" 2>&1
 else
-    fgrestore -S "$lastfullbulocation" -D "$preppath" -C "$restore_my_cnf_file" -M -N -r \
+    fgrestore -S "$lastbulocation" -D "$preppath" -C "$restore_my_cnf_file" -M -N -r \
       $( [ "$run_restorecon" == "yes" ] && echo -R ) >> "$logfile" 2>&1
 fi
 fgrestorestatus=$?
