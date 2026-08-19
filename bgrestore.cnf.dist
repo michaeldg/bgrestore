@@ -2,6 +2,15 @@
 
 # bgrestore configuration file
 
+# Path to the my.cnf fgrestore should use for the restore (parses datadir, tmpdir,
+# innodb log/doublewrite dirs, log-error/log-bin/relay-log paths, and the owning
+# 'user=' for chown). Same default fgrestore itself falls back to.
+restore_my_cnf_file=/etc/my.cnf
+
+# systemd service name to stop/start around the restore. Needed to target a specific
+# instance when running restore tests on a multi-instance host; select which
+# bgrestore.cnf (and thus which service_name) via '-c|--config'.
+service_name=mariadb
 
 # MariaDB host for restore
 restorehost=localhost
@@ -39,17 +48,8 @@ backuphost=hostname_from_backup_history
 # Skip copy step, place backup in preppath after creating it. This will also make bgrestore delete the contents of the folder instead of the folder itself (after succeeding)
 skipcopy=no
 
-# Delete the previous restore first (before starting to decompress the backup)
-deletefirst=no
-
 # Datadir
 datadir=/var/lib/mysql
-
-# Datadir owner
-datadirowner=mysql
-
-# Datadir group
-datadirgroup=mysql
 
 # Path to keep logs
 logpath=/var/log

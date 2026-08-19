@@ -49,9 +49,7 @@ function  log_error() {
 
 # Preflight checks
 function preflight {
-    # find and source the config file
-    etccnf=$( find /etc -name bgrestore.cnf )
-    scriptdir=$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    # source the config file (path resolved by CLI arg parsing / default, see "Begin script")
     if [ -e "$etccnf" ]; then
         source "$etccnf"
     elif [ -e "$scriptdir"/bgrestore.cnf ]; then
@@ -65,23 +63,6 @@ function preflight {
     fi
     # set logfile
     logfile=$logpath/bgrestore_$(date +%Y-%m-%d-%T).log    # logfile
-
-    # Check for mariabackup or xtrabackup
-    if [ "$backuptool" == "1" ] && command -v mariabackup >/dev/null; then
-        innobackupex=$(command -v mariabackup)
-    elif [ "$backuptool" == "2" ] && command -v innobackupex >/dev/null; then
-        innobackupex=$(command -v innobackupex)
-    else
-        echo "The backuptool does not appear to be installed. Please check that a valid backuptool is chosen in bgbackup.cnf and that it's installed."
-        log_info "The backuptool does not appear to be installed. Please check that a valid backuptool is chosen in bgbackup.cnf and that it's installed."
-        log_status=FAILED
-        mail_log
-        exit 1
-    fi
-
-    innocommand="$innobackupex"
-    if [ "$backuptool" == "1" ] ; then innocommand=$innocommand" --innobackupex"; fi
-
 
     if [ "$datadir" == '' ] ; then
         log_info "Datadir location not set correctly."
@@ -149,127 +130,21 @@ function lastfullinfo {
         exit 1
     fi
 
-    lastfullcompressed=$($mysqlhistcommand "select compressed from $backuphistschema.backup_history where uuid = '$lastfulluuid' ")
-    lastfullencrypted=$($mysqlhistcommand "select encrypted from $backuphistschema.backup_history where uuid = '$lastfulluuid' ")
-    if [ "$lastfullencrypted" == "yes" ] ; then
-    	lastfullcryptkey=$($mysqlhistcommand "select cryptkey from $backuphistschema.backup_history where uuid = '$lastfulluuid' ")
-    fi
     log_info "Last full backup to restore: $lastfullbulocation "
 }
 
-# Function to prepare backup for restore
-function prepit {
-    if [ "$skipcopy" != "yes" ]; then
-        cp -R "$lastfullbulocation" "$preppath"/
-        buname=$(basename "$lastfullbulocation")
-        bufullpath="$preppath"/"$buname"
-    else
-        bufullpath="$preppath"
-    fi
-
-	if [ "$lastfullencrypted" == "yes" ] ; then
-		log_info "Backup is encrypted."
-        $innocommand --decrypt=AES256 --encrypt-key="$(cat "$lastfullcryptkey")" --parallel="$threads" "$bufullpath" >> "$logfile"
-        decryptstatus=$?
-        if [ "$decryptstatus" -eq 0 ] ; then
-            log_info "Backup decrypt was successfol."
-        else
-            log_status=FAILED
-            log_info "Something went wrong. Decrypt failed."
-            exit 1
-        fi
-        for i in `find $bufullpath -iname "*\.xbcrypt"`; do rm -f $i; done
-        log_info "Backup now decrypted."
-    fi 
-    if [ "$lastfullcompressed" == "yes" ] ; then
-    	log_info "Backup is compressed."
-        $innocommand --decompress --parallel="$threads" "$bufullpath" >> "$logfile"
-        decompressstatus=$?
-        if [ "$decompressstatus" -eq 0 ] ; then
-            log_info "Backup decompress was successfol."
-        else
-            log_status=FAILED
-            log_info "Something went wrong. Decompress failed."
-            exit 1
-        fi
-
-        for i in `find $bufullpath -iname "*\.qp"`; do rm -f $i; done
-        log_info "Backup is now decompressed."
-    fi
-    $innocommand --apply-log "$bufullpath"  >> "$logfile" 
-    applystatus=$?
-    if [ "$applystatus" -eq 0 ] ; then
-        log_info "Backup apply log was successfol."
-    else
-        log_status=FAILED
-        log_info "Something went wrong. Apply log failed."
-        exit 1
-    fi
-    log_info "Backup has been prepared for restore."
-}
-
-# Function to delete old restore
-function deleteoldrestore {
-
-	log_info "Shutting down MariaDB to restore. "
-	mysqlshutdowncreate
-    $mysqlshutdowncommand "shutdown"
-
-    log_info "More shutdown commands to make sure MariaDB is down."
-    systemctl stop mariadb
-    pkill -9 mysqld
-    systemctl stop mariadb
-    log_info "Current data dir contents:"
-    ls -al "${datadir:?}" >> "$logfile"
-
-    log_info "Deleting the data directory."
-    rm -Rf "${datadir:?}"/*
-}
-
-# Function to restore
-function restoreit {
-
-    log_info "Moving the prepared backup in $bufullpath to the data directory."
-    $innocommand --move-back "$bufullpath" --datadir="${datadir:?}"
-    movebackstatus=$?
-    if [ "$movebackstatus" -eq 0 ] ; then
-        log_info "MariaDB succussfully restored and restarted."
-    else
-        log_status=FAILED
-        log_info "Something went wrong. Move back process failed."
-        exit 1
-    fi
-
-    log_info "Fixing privileges."
-    chown -R "$datadirowner":"$datadirgroup" "$datadir"
-
-    echo "Fixing unfinished transactions. MDEV-6660 workaround."
-    sudo -u mysql mysqld --tc-heuristic-recover=ROLLBACK
-
-    log_info "Starting MariaDB."
-    systemctl start mariadb
-
-    startstatus=$?
-    if [ "$startstatus" -eq 0 ] ; then
-        log_status=SUCCEEDED
-        log_info "MariaDB succussfully restored and restarted."
-    else
-        log_status=FAILED
-        log_info "Something went wrong. MariaDB did not start. Check error log."
-        exit 1
-    fi
-}
-
 # Cleanup the decompressed/decrypted backup copy
+# Regardless of skipcopy, fgrestore always ends up with the prepared backup flattened
+# directly into $preppath (skipcopy=yes: prepared in place there via '-I'; skipcopy=no:
+# fgrestore itself copies into it via '-D') -- so cleanup is now the same either way.
+# Also sweeps fgrestore's chain-staging dirs ('<restore_path>.inc.*'); in practice bgrestore
+# only ever restores Full backups (see lastfullinfo) so these shouldn't exist, but -M's
+# --move-back already moved everything of substance out, so sweeping is a safe no-op.
 function cleanup {
-	if [ "$log_status" == "SUCCEEDED" ] ; then 
+	if [ "$log_status" == "SUCCEEDED" ] ; then
 	    log_info "Cleaning up."
-        if [ "$skipcopy" != "yes" ]; then
-	        rm -Rf "${bufullpath:?}"
-        else # Clean up prep directory instead of deleting the full backup path (which is also prep directory)
-	        rm -Rf "${preppath}/"*
-        fi
-            
+	    rm -Rf "${preppath:?}"/*
+	    rm -Rf "${preppath:?}".inc.*
 	    log_info "Complete."
 	fi
 }
@@ -292,6 +167,35 @@ function log_cleanup {
 # we trap control-c
 trap sigint INT
 
+scriptdir=$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+etccnf="/etc/bgrestore.cnf"
+
+# Function to display usage
+usage() {
+    echo "Usage: $0 [-c config_file | --config config_file]"
+    exit 1
+}
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        -c|--config)
+            if [[ -n "${2:-}" ]]; then
+                etccnf="$2"
+                shift
+            else
+                echo "Error: --config requires a non-empty option argument."
+                usage
+            fi
+            ;;
+        *)
+            echo "Error: Unknown option $1"
+            usage
+            ;;
+    esac
+    shift
+done
+
 # Set some specific variables
 starttime=$(date +"%Y-%m-%d %H:%M:%S")
 mdate=$(date +%m/%d/%y)    # Date for mail subject. Not in function so set at script start time, not when backup is finished.
@@ -299,15 +203,66 @@ mysqlcommand=$(command -v mysql)
 
 # do the work
 preflight
-if [ "$deletefirst" == "yes" ] ; then
-    deleteoldrestore
+
+# Check that we are not already running. Scoped per service_name so separately
+# configured instances on the same restore host (multi-instance restore testing) can
+# run concurrently, while two runs against the same instance still can't overlap.
+lockfile=/tmp/bgrestore
+[ -n "$service_name" ] && lockfile=$lockfile"-$service_name"
+lockfile=$lockfile".lock"
+
+if [ -f $lockfile ]
+then
+    log_error "Another instance of $lockfile is already running. Exiting."
 fi
+trap 'rm -f $lockfile' 0
+touch $lockfile
+
 lastfullinfo
-prepit
-if [ "$deletefirst" != "yes" ] ; then
-    deleteoldrestore
+
+log_info "Shutting down MariaDB to restore."
+mysqlshutdowncreate
+$mysqlshutdowncommand "shutdown"
+
+# Decrypt/decompress/prepare/move-back are all handled by fgrestore, chain-aware
+# (Full/Differential/Incremental). '-r' always removes compressed originals after
+# decompression. skipcopy=yes means copy-last-backup.sh already rsynced the backup
+# straight into preppath, so '-I' (in-place) prepares it there directly -- a second
+# copy would double disk usage. Otherwise fgrestore copies from lastfullbulocation
+# into preppath itself via '-D'.
+if [ "$skipcopy" == "yes" ]; then
+    fgrestore -S "$preppath" -C "$restore_my_cnf_file" -M -N -r -I \
+      $( [ "$run_restorecon" == "yes" ] && echo -R ) >> "$logfile" 2>&1
+else
+    fgrestore -S "$lastfullbulocation" -D "$preppath" -C "$restore_my_cnf_file" -M -N -r \
+      $( [ "$run_restorecon" == "yes" ] && echo -R ) >> "$logfile" 2>&1
 fi
-restoreit
+fgrestorestatus=$?
+if [ "$fgrestorestatus" -eq 0 ] ; then
+    log_info "fgrestore completed successfully."
+else
+    log_status=FAILED
+    log_info "Something went wrong. fgrestore failed. See $logfile for details."
+    mail_log
+    exit 1
+fi
+
+log_info "Fixing unfinished transactions. MDEV-6660 workaround."
+sudo -u mysql mysqld --tc-heuristic-recover=ROLLBACK
+
+log_info "Starting MariaDB."
+systemctl start "$service_name"
+startstatus=$?
+if [ "$startstatus" -eq 0 ] ; then
+    log_status=SUCCEEDED
+    log_info "MariaDB succussfully restored and restarted."
+else
+    log_status=FAILED
+    log_info "Something went wrong. MariaDB did not start. Check error log."
+    mail_log
+    exit 1
+fi
+
 cleanup
 
 # email the log
