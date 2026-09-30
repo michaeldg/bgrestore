@@ -10,11 +10,12 @@ This all assumes the backup was taken with bgbackup (https://github.com/bstillma
 
 Copy bgrestore.cnf.dist to /etc/bgrestore.cnf and configure as needed (details below). To run restore tests against a multi-instance host, copy it to a distinct path per instance instead and select it with `bgrestore -c /path/to/that/instance's/bgrestore.cnf`.
 
-Currently the script assumes the location of the backup on the source and the destination is the same. Ex: if the backup is in /backups on the server backed up, it should also reside in /backups on the server to be restored. 
+There are two ways to get the backup onto the server to be restored, controlled by `skipcopy`:
 
-The backup needs to already exist on the server to be restored. This can be handled in a few different ways:
-* use run_after_success in bgbackup.cnf to run a script which SCPs the backup to the server to be restored
-* share a disk at the same mount point on each server
+* **`skipcopy=yes`** (local storage): something else -- typically `copy-last-backup.sh` from the [mysql-mariadb-physical-backup](../mysql-mariadb-physical-backup) role, run via bgbackup's `run_after_success` hook -- has already transferred the backup, along with its full dependency chain (Full + any Differential/Incremental in between), into `preppath` as one subdirectory per chain member. bgrestore picks whichever member is newest under `preppath` and restores it **in place** (`fgrestore -I`) -- no second copy.
+* **`skipcopy=no`** (shared storage, e.g. the same mount point on both servers): bgrestore has fgrestore copy the chain from `backup_history`'s recorded location into `preppath` itself before preparing it.
+
+Either way, fgrestore resolves the chain from each member's own `bgbackup.cnf` (its `incbase=` pointer). If a chain was relocated as a group -- as `skipcopy=yes` mode does, moving it onto a different host under a different parent directory -- and a literal `incbase=` path no longer exists, the chain walk falls back to looking for a same-named directory next to the one it's currently walking, so a relocated chain still resolves correctly without any `bgbackup.cnf` needing to be rewritten.
 
 
 ------------------------------------
