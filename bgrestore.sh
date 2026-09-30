@@ -134,6 +134,24 @@ function lastbackupinfo {
     log_info "Last backup to restore: $lastbulocation "
 }
 
+# Clears fgrestore chain-staging siblings ('<preppath>.inc.*') left behind by
+# a run that failed mid-prepare -- cleanup() below only runs on success, so a
+# retry after a failure could otherwise find and reuse stale partial state.
+# Called unconditionally, early, before either skipcopy mode's own copy step.
+function cleanup_stale_prepare_state {
+    log_info "Clearing any stale chain-staging directories left by a previous failed run."
+    rm -Rf "${preppath:?}".inc.* 2>/dev/null
+}
+
+# Filesystem-driven selection for skipcopy=yes mode: which chain member did
+# copy-last-backup.sh most recently deliver under $preppath, found by mtime
+# of its own bgbackup.cnf -- not lastbackupinfo's DB-reported location, which
+# is a backup-host absolute path that generally does not exist here.
+function find_latest_in_preppath {
+    find "$preppath" -mindepth 2 -maxdepth 2 -name bgbackup.cnf -printf '%T@ %h\n' 2>/dev/null \
+      | sort -rn | head -n1 | awk '{print $2}'
+}
+
 # Cleanup the decompressed/decrypted backup copy
 # Regardless of skipcopy, fgrestore always ends up with the prepared backup flattened
 # directly into $preppath (skipcopy=yes: prepared in place there via '-I'; skipcopy=no:
@@ -220,6 +238,8 @@ fi
 trap 'rm -f $lockfile' 0
 touch $lockfile
 
+cleanup_stale_prepare_state
+
 lastbackupinfo
 
 log_info "Shutting down MariaDB to restore."
@@ -233,9 +253,22 @@ $mysqlshutdowncommand "shutdown"
 # copy would double disk usage. Otherwise fgrestore copies from lastbulocation
 # into preppath itself via '-D'.
 if [ "$skipcopy" == "yes" ]; then
-    fgrestore -S "$preppath" -C "$restore_my_cnf_file" -M -N -r -I \
+    restore_source=$(find_latest_in_preppath)
+    if [ -z "$restore_source" ]; then
+        log_info "Error: no backup with a bgbackup.cnf found under $preppath"
+        log_info "Did copy-last-backup.sh run? Nothing to restore."
+        log_status=FAILED
+        mail_log
+        exit 1
+    fi
+    if [ "$(basename "$restore_source")" != "$(basename "$lastbulocation")" ]; then
+        log_info "NOTE: backup_history's most recent backup ($lastbulocation) differs from what was found in $preppath ($restore_source) -- restoring what is physically present."
+    fi
+    fgrestore -S "$restore_source" -C "$restore_my_cnf_file" -M -N -r -I \
       $( [ "$run_restorecon" == "yes" ] && echo -R ) >> "$logfile" 2>&1
 else
+    log_info "Clearing $preppath before copying the backup to it (shared-storage mode)."
+    rm -Rf "${preppath:?}"/*
     fgrestore -S "$lastbulocation" -D "$preppath" -C "$restore_my_cnf_file" -M -N -r \
       $( [ "$run_restorecon" == "yes" ] && echo -R ) >> "$logfile" 2>&1
 fi
