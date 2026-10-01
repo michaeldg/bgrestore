@@ -143,13 +143,20 @@ function cleanup_stale_prepare_state {
     rm -Rf "${preppath:?}".inc.* 2>/dev/null
 }
 
-# Filesystem-driven selection for skipcopy=yes mode: which chain member did
-# copy-last-backup.sh most recently deliver under $preppath, found by mtime
-# of its own bgbackup.cnf -- not lastbackupinfo's DB-reported location, which
-# is a backup-host absolute path that generally does not exist here.
-function find_latest_in_preppath {
-    find "$preppath" -mindepth 2 -maxdepth 2 -name bgbackup.cnf -printf '%T@ %h\n' 2>/dev/null \
-      | sort -rn | head -n1 | awk '{print $2}'
+# Locates backup_history's most recent SUCCEEDED backup (lastbulocation,
+# from lastbackupinfo) under $preppath for skipcopy=yes mode. lastbulocation
+# itself is a backup-host absolute path that generally does not exist here,
+# but copy-last-backup.sh preserves each chain member's own directory
+# basename when it transfers it, so match on that instead of trusting
+# filesystem mtimes -- mtime-based selection could pick up whatever happens
+# to be newest under $preppath regardless of whether backup_history actually
+# considers it the latest successful backup.
+function find_in_preppath_by_basename {
+    local wanted_basename
+    wanted_basename=$(basename "$1")
+    find "$preppath" -mindepth 2 -maxdepth 2 -name bgbackup.cnf -printf '%h\n' 2>/dev/null \
+      | while read -r d; do [ "$(basename "$d")" = "$wanted_basename" ] && echo "$d"; done \
+      | head -n1
 }
 
 # Cleanup the decompressed/decrypted backup copy
@@ -253,16 +260,13 @@ $mysqlshutdowncommand "shutdown"
 # copy would double disk usage. Otherwise fgrestore copies from lastbulocation
 # into preppath itself via '-D'.
 if [ "$skipcopy" == "yes" ]; then
-    restore_source=$(find_latest_in_preppath)
+    restore_source=$(find_in_preppath_by_basename "$lastbulocation")
     if [ -z "$restore_source" ]; then
-        log_info "Error: no backup with a bgbackup.cnf found under $preppath"
-        log_info "Did copy-last-backup.sh run? Nothing to restore."
+        log_info "Error: backup_history's most recent successful backup ($lastbulocation) was not found under $preppath"
+        log_info "Did copy-last-backup.sh transfer it yet? Nothing to restore."
         log_status=FAILED
         mail_log
         exit 1
-    fi
-    if [ "$(basename "$restore_source")" != "$(basename "$lastbulocation")" ]; then
-        log_info "NOTE: backup_history's most recent backup ($lastbulocation) differs from what was found in $preppath ($restore_source) -- restoring what is physically present."
     fi
     fgrestore -S "$restore_source" -C "$restore_my_cnf_file" -M -N -r -I \
       $( [ "$run_restorecon" == "yes" ] && echo -R ) >> "$logfile" 2>&1
