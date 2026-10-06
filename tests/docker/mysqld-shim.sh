@@ -46,6 +46,14 @@ if [[ "$is_tc_heuristic_recover" -eq 0 ]]; then
     exec "$real_mysqld" "$@"
 fi
 
+# Record the interception (args + wall-clock time) so a test can assert on
+# exactly when, and with what arguments, bgrestore.sh's MDEV-6660 line
+# actually ran -- not just infer it from nearby log_info lines. A fixed
+# path, not an env var: bgrestore.sh calls `sudo -u mysql mysqld ...` with
+# no --preserve-env, and sudo strips the environment by default, so an env
+# var set on the outer `docker exec` would never reach this shim.
+printf '%s CALLED-WITH:%s\n' "$(date +%Y-%m-%d-%T)" " $*" >> /tmp/mysqld-shim.log
+
 "$real_mysqld" "$@" &
 pid=$!
 
