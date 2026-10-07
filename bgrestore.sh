@@ -287,7 +287,21 @@ else
 fi
 
 log_info "Fixing unfinished transactions. MDEV-6660 workaround."
-sudo -u mysql mysqld --tc-heuristic-recover=ROLLBACK
+# This starts a full mysqld instance; the heuristic XA rollback itself
+# happens during InnoDB's own crash-recovery startup, complete well before
+# the instance is ready for connections -- but the instance then just
+# keeps running as an ordinary server and never exits on its own. Verified
+# against the real binary: run unmodified (foreground, no backgrounding/
+# timeout/kill), this line hangs forever on every restore that doesn't
+# happen to hit the actual MDEV-6660 condition. Background it, give crash
+# recovery a moment to finish, then stop it (matching both the sudo
+# wrapper and its mysqld child, since sudo's own forking behavior for
+# signal delivery to the child varies) so the socket/port are free again
+# for the real startup below.
+sudo -u mysql mysqld --tc-heuristic-recover=ROLLBACK &
+sleep 5
+pkill -TERM -f "mysqld --tc-heuristic-recover=ROLLBACK" 2>/dev/null
+wait 2>/dev/null
 
 log_info "Starting MariaDB."
 systemctl start "$service_name"
